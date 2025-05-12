@@ -340,6 +340,11 @@ val add_cert_to_store : context -> string -> unit
 (** Add a certificate to the [ctx] trust storage. The value should be contents
     of the certificate as string in PEM format. *)
 
+type engine
+
+
+val engine_init : string -> engine
+
 val use_certificate : context -> string -> string -> unit
 (** [use_certificate ctx cert privkey] makes the context [ctx] use [cert] as *
     certificate's file name (in PEM format) and [privkey] as private key file *
@@ -349,7 +354,7 @@ val use_certificate_from_string : context -> string -> string -> unit
 (** Use a certificate whose contents is given as argument (you should use
     instead [use_certificate] if you want to read the certificate from a file). *)
 
-val use_certificate_and_engine_key : context -> string -> string -> string -> unit
+val use_certificate_and_engine_key : context -> string -> engine -> string -> unit
 (** [use_certificate_and_engine_key ctx cert engine key_id] makes the context [ctx]
     use [cert] as certificate's PEM string and use [engine_id] to load [key_id] as
     private key. *)

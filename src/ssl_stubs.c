@@ -682,76 +682,102 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_from_string(value context,
   CAMLreturn(Val_unit);
 }
 
-static ENGINE *global_engine = NULL; // bad but fine for testing
+struct engine_handle {
+  ENGINE *engine;
+};
 
-CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
+static void finalize_engine_handle(value v) {
+  struct engine_handle *eh = *(struct engine_handle **)Data_custom_val(v);
+  if (eh->engine != NULL) {
+    ENGINE_finish(eh->engine);
+    ENGINE_free(eh->engine);
+  }
+  free(eh);
+}
+
+static struct custom_operations engine_ops = {
+  "ocaml_ssl_engine",
+  finalize_engine_handle,
+  custom_compare_default,
+  custom_hash_default,
+  custom_serialize_default,
+  custom_deserialize_default,
+  custom_compare_ext_default
+};
+
+CAMLprim value ocaml_ssl_engine_init(value engine_id) {
+  CAMLparam1(engine_id);
+  CAMLlocal1(result);
+  const char *engine_id_str = String_val(engine_id);
+  ENGINE *engine = ENGINE_by_id(engine_id_str);
+  if (!engine || !ENGINE_init(engine)) {
+    ERR_print_errors_fp(stderr);
+    caml_failwith("Failed to init engine");
+  }
+
+  struct engine_handle *eh = malloc(sizeof(struct engine_handle));
+  eh->engine = engine;
+
+  result = caml_alloc_custom(&engine_ops, sizeof(struct engine_handle *), 0, 1);
+  *(struct engine_handle **)Data_custom_val(result) = eh;
+
+  CAMLreturn(result);
+}
+
+CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(
+  value context,
   value cert,
-  value engine_id,
+  value engine_val,
   value key_id) {
-    CAMLparam4(context, cert, engine_id, key_id);
-    SSL_CTX *ctx = Ctx_val(context);
-    const char *cert_data = String_val(cert);
-    int cert_data_length = caml_string_length(cert);
-    const char *engine_id_str = String_val(engine_id);
-    const char *key_id_str = String_val(key_id);
-    char buf[256];
-    X509 *x509_cert = NULL;
-    EVP_PKEY *pkey = NULL;
-    BIO *cbio = NULL;
-    ENGINE *engine = NULL;
+  CAMLparam4(context, cert, engine_val, key_id);
+  SSL_CTX *ctx = Ctx_val(context);
+  const char *cert_data = String_val(cert);
+  int cert_data_length = caml_string_length(cert);
+  const char *key_id_str = String_val(key_id);
+  char buf[256];
 
-    fprintf(stdout, "[OCaml-SSL] Loading certificate from memory...\n");
-    cbio = BIO_new_mem_buf((void *)cert_data, cert_data_length);
-    x509_cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
-    if (NULL == x509_cert || SSL_CTX_use_certificate(ctx, x509_cert) <= 0) {
-      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
-      caml_raise_with_arg(*caml_named_value("ssl_exn_certificate_error"),
-                          caml_copy_string(buf));
-    }
-    fprintf(stderr, "[OCaml-SSL] Certificate loaded and applied to context.\n");
+  X509 *x509_cert = NULL;
+  EVP_PKEY *pkey = NULL;
+  BIO *cbio = NULL;
 
-    fprintf(stderr, "[OCaml-SSL] Loading engine: %s\n", engine_id_str);
-    engine = ENGINE_by_id(engine_id_str);
-    if (!engine) {
-      ERR_print_errors_fp(stderr);
-      caml_failwith("ENGINE_by_id returned NULL");
-    }
-    if (!ENGINE_init(engine)) {
-      ERR_print_errors_fp(stderr);
-      caml_failwith("ENGINE_init failed");
-    }
+  // Unwrap the engine
+  struct engine_handle *eh = *(struct engine_handle **)Data_custom_val(engine_val);
+  ENGINE *engine = eh->engine;
 
-    if (!engine) {
-      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
-      caml_raise_with_arg(*caml_named_value("ssl_exn_engine_error"),
-                          caml_copy_string(buf));
-    }
-    fprintf(stderr, "[OCaml-SSL] Engine %s initialized successfully.\n", engine_id_str);
+  // Load certificate
+  fprintf(stderr, "[OCaml-SSL] Loading certificate from memory...\n");
+  cbio = BIO_new_mem_buf((void *)cert_data, cert_data_length);
+  x509_cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
+  BIO_free(cbio);  // clean up BIO
 
-    fprintf(stderr, "[OCaml-SSL] Loading private key with id: %s\n", key_id_str);
-    pkey = ENGINE_load_private_key(engine, key_id_str, NULL, NULL);
-    if (NULL == pkey || SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
-      ERR_print_errors_fp(stderr);
-      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
-      ENGINE_free(engine);
-      fprintf(stderr, "[OCaml-SSL] Failed to load or use private key: %s\n", buf);
-      caml_raise_with_arg(*caml_named_value("ssl_exn_private_key_error"),
-                          caml_copy_string(buf));
-    }
-    fprintf(stderr, "[OCaml-SSL] Private key loaded and applied.\n");
+  if (NULL == x509_cert || SSL_CTX_use_certificate(ctx, x509_cert) <= 0) {
+    ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+    X509_free(x509_cert);
+    caml_raise_with_arg(*caml_named_value("ssl_exn_certificate_error"),
+                        caml_copy_string(buf));
+  }
+  X509_free(x509_cert);  // can free after use in ctx
+  fprintf(stderr, "[OCaml-SSL] Certificate loaded and applied to context.\n");
 
-    if (!SSL_CTX_check_private_key(ctx)) {
-      ENGINE_free(engine);
-      fprintf(stderr, "[OCaml-SSL] Certificate and key do not match.\n");
-      caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
-    }
+  // Load private key from engine
+  fprintf(stderr, "[OCaml-SSL] Loading private key with id: %s\n", key_id_str);
+  pkey = ENGINE_load_private_key(engine, key_id_str, NULL, NULL);
+  if (NULL == pkey || SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
+    ERR_print_errors_fp(stderr);
+    ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+    if (pkey) EVP_PKEY_free(pkey);
+    caml_raise_with_arg(*caml_named_value("ssl_exn_private_key_error"),
+                        caml_copy_string(buf));
+  }
+  EVP_PKEY_free(pkey);
+  fprintf(stderr, "[OCaml-SSL] Private key loaded and applied.\n");
 
-    // Don't free the engine here!
-    global_engine = engine; // store to prevent early GC/unload
-    // ENGINE_free(engine);
-    // fprintf(stderr, "[OCaml-SSL] Engine freed. Initialization complete.\n");
-    
-    CAMLreturn(Val_unit);
+  // Check key matches certificate
+  if (!SSL_CTX_check_private_key(ctx)) {
+    caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
+  }
+
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value ocaml_ssl_get_verify_result(value socket) {

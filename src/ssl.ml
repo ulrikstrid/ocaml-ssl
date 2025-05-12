@@ -251,6 +251,13 @@ external add_cert_to_store :
   -> unit
   = "ocaml_ssl_ctx_add_cert_to_store"
 
+type engine
+
+external engine_init :
+   string
+  -> engine
+  = "ocaml_ssl_engine_init"
+
 external use_certificate :
    context
   -> string
@@ -268,7 +275,7 @@ external use_certificate_from_string :
 external use_certificate_and_engine_key :
    context
   -> string
-  -> string
+  -> engine
   -> string
   -> unit
   = "ocaml_ssl_ctx_use_certificate_and_engine_key"
