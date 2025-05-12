@@ -682,6 +682,8 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_from_string(value context,
   CAMLreturn(Val_unit);
 }
 
+static ENGINE *global_engine = NULL; // bad but fine for testing
+
 CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
   value cert,
   value engine_id,
@@ -710,7 +712,6 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
 
     fprintf(stderr, "[OCaml-SSL] Loading engine: %s\n", engine_id_str);
     engine = ENGINE_by_id(engine_id_str);
-    engine = ENGINE_by_id(engine_id_str);
     if (!engine) {
       ERR_print_errors_fp(stderr);
       caml_failwith("ENGINE_by_id returned NULL");
@@ -720,7 +721,7 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
       caml_failwith("ENGINE_init failed");
     }
 
-    if (!engine || !ENGINE_init(engine)) {
+    if (!engine) {
       ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
       caml_raise_with_arg(*caml_named_value("ssl_exn_engine_error"),
                           caml_copy_string(buf));
@@ -745,6 +746,8 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
       caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
     }
 
+    // Don't free the engine here!
+    global_engine = engine; // store to prevent early GC/unload
     // ENGINE_free(engine);
     // fprintf(stderr, "[OCaml-SSL] Engine freed. Initialization complete.\n");
     
