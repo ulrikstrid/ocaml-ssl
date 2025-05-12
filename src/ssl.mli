@@ -349,6 +349,11 @@ val use_certificate_from_string : context -> string -> string -> unit
 (** Use a certificate whose contents is given as argument (you should use
     instead [use_certificate] if you want to read the certificate from a file). *)
 
+val use_certificate_and_engine_key : context -> string -> string -> string -> unit
+(** [use_certificate_and_engine_key ctx cert engine key_id] makes the context [ctx]
+    use [cert] as certificate's PEM string and use [engine_id] to load [key_id] as
+    private key. *)
+
 val set_password_callback : context -> (bool -> string) -> unit
 (** Set the callback function called to get passwords for encrypted PEM files. *
     The callback function takes a boolean argument which indicates if it's used

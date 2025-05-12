@@ -265,6 +265,14 @@ external use_certificate_from_string :
   -> unit
   = "ocaml_ssl_ctx_use_certificate_from_string"
 
+external use_certificate_and_engine_key :
+   context
+  -> string
+  -> string
+  -> string
+  -> unit
+  = "ocaml_ssl_ctx_use_certificate_and_engine_key"
+
 external set_password_callback :
    context
   -> (bool -> string)

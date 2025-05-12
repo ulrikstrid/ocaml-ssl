@@ -46,6 +46,7 @@
 
 #include <openssl/crypto.h>
 #include <openssl/err.h>
+#include <openssl/engine.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/tls1.h>
@@ -679,6 +680,54 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_from_string(value context,
   }
 
   CAMLreturn(Val_unit);
+}
+
+CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
+  value cert,
+  value engine_id,
+  value key_id) {
+    CAMLparam4(context, cert, engine_id, key_id);
+    SSL_CTX *ctx = Ctx_val(context);
+    const char *cert_data = String_val(cert);
+    int cert_data_length = caml_string_length(cert);
+    const char *engine_id_str = String_val(engine_id);
+    const char *key_id_str = String_val(key_id);
+    char buf[256];
+    X509 *x509_cert = NULL;
+    EVP_PKEY *pkey = NULL;
+    BIO *cbio = NULL;
+    ENGINE *engine = NULL;
+
+    cbio = BIO_new_mem_buf((void *)cert_data, cert_data_length);
+    x509_cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
+    if (NULL == x509_cert || SSL_CTX_use_certificate(ctx, x509_cert) <= 0) {
+      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+      caml_raise_with_arg(*caml_named_value("ssl_exn_certificate_error"),
+                          caml_copy_string(buf));
+    }
+
+    engine = ENGINE_by_id(engine_id_str);
+    if (!engine || !ENGINE_init(engine)) {
+      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+      caml_raise_with_arg(*caml_named_value("ssl_exn_engine_error"),
+                          caml_copy_string(buf));
+    }
+
+    pkey = ENGINE_load_private_key(engine, key_id_str, NULL, NULL);
+    if (NULL == pkey || SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
+      ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+      caml_raise_with_arg(*caml_named_value("ssl_exn_private_key_error"),
+                          caml_copy_string(buf));
+    }
+
+    if (!SSL_CTX_check_private_key(ctx)) {
+      ENGINE_free(engine);
+      caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
+    }
+
+    ENGINE_free(engine);
+
+    CAMLreturn(Val_unit);
 }
 
 CAMLprim value ocaml_ssl_get_verify_result(value socket) {
