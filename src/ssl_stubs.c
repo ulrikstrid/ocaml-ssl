@@ -725,7 +725,7 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
       caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
     }
 
-    ENGINE_free(engine);
+    // ENGINE_free(engine);
 
     CAMLreturn(Val_unit);
 }
