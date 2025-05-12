@@ -698,6 +698,7 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
     BIO *cbio = NULL;
     ENGINE *engine = NULL;
 
+    fprintf(stdout, "[OCaml-SSL] Loading certificate from memory...\n");
     cbio = BIO_new_mem_buf((void *)cert_data, cert_data_length);
     x509_cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
     if (NULL == x509_cert || SSL_CTX_use_certificate(ctx, x509_cert) <= 0) {
@@ -705,28 +706,48 @@ CAMLprim value ocaml_ssl_ctx_use_certificate_and_engine_key(value context,
       caml_raise_with_arg(*caml_named_value("ssl_exn_certificate_error"),
                           caml_copy_string(buf));
     }
+    fprintf(stderr, "[OCaml-SSL] Certificate loaded and applied to context.\n");
 
+    fprintf(stderr, "[OCaml-SSL] Loading engine: %s\n", engine_id_str);
     engine = ENGINE_by_id(engine_id_str);
+    engine = ENGINE_by_id(engine_id_str);
+    if (!engine) {
+      ERR_print_errors_fp(stderr);
+      caml_failwith("ENGINE_by_id returned NULL");
+    }
+    if (!ENGINE_init(engine)) {
+      ERR_print_errors_fp(stderr);
+      caml_failwith("ENGINE_init failed");
+    }
+
     if (!engine || !ENGINE_init(engine)) {
       ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
       caml_raise_with_arg(*caml_named_value("ssl_exn_engine_error"),
                           caml_copy_string(buf));
     }
+    fprintf(stderr, "[OCaml-SSL] Engine %s initialized successfully.\n", engine_id_str);
 
+    fprintf(stderr, "[OCaml-SSL] Loading private key with id: %s\n", key_id_str);
     pkey = ENGINE_load_private_key(engine, key_id_str, NULL, NULL);
     if (NULL == pkey || SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
+      ERR_print_errors_fp(stderr);
       ERR_error_string_n(ERR_get_error(), buf, sizeof(buf));
+      ENGINE_free(engine);
+      fprintf(stderr, "[OCaml-SSL] Failed to load or use private key: %s\n", buf);
       caml_raise_with_arg(*caml_named_value("ssl_exn_private_key_error"),
                           caml_copy_string(buf));
     }
+    fprintf(stderr, "[OCaml-SSL] Private key loaded and applied.\n");
 
     if (!SSL_CTX_check_private_key(ctx)) {
       ENGINE_free(engine);
+      fprintf(stderr, "[OCaml-SSL] Certificate and key do not match.\n");
       caml_raise_constant(*caml_named_value("ssl_exn_unmatching_keys"));
     }
 
-    // ENGINE_free(engine);
-
+    ENGINE_free(engine);
+    fprintf(stderr, "[OCaml-SSL] Engine freed. Initialization complete.\n");
+    
     CAMLreturn(Val_unit);
 }
 
